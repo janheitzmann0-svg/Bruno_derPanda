@@ -40,6 +40,87 @@ const DE = 'de-DE';
 let toastBox = null;
 const isAdmin = () => cfg.meId === cfg.admin;
 
+/* --- Installation als App --- */
+let installEvent = null;
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent);
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches
+  || window.navigator.standalone === true;
+
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvent = e; render(); });
+window.addEventListener('appinstalled', () => { installEvent = null; toast('App installiert 🐷'); render(); });
+
+function installHelp() {
+  const steps = isIOS()
+    ? `<ol class="steps"><li>Unten in Safari auf <b>Teilen</b> tippen (das Quadrat mit dem Pfeil nach oben).</li>
+       <li>In der Liste nach unten scrollen zu <b>Zum Home-Bildschirm</b>.</li>
+       <li>Oben rechts auf <b>Hinzufügen</b> tippen.</li></ol>
+       <p class="hint">Das geht nur in <b>Safari</b> – nicht in Chrome oder im WhatsApp-Browser.
+       Falls du den Link aus WhatsApp geöffnet hast: unten rechts auf das Safari-Symbol tippen.</p>`
+    : `<ol class="steps"><li>Oben rechts im Browser auf das <b>Menü</b> (drei Punkte) tippen.</li>
+       <li><b>App installieren</b> bzw. <b>Zum Startbildschirm hinzufügen</b> wählen.</li>
+       <li>Bestätigen.</li></ol>
+       <p class="hint">Am besten in <b>Chrome</b>. Falls du den Link aus WhatsApp geöffnet hast,
+       zuerst über das Menü <b>Im Browser öffnen</b>.</p>`;
+  const sh = el(`<div class="sheet"><div class="inner">
+    <h2 style="margin-top:0">App installieren</h2>
+    ${steps}
+    <div style="height:10px"></div>
+    <button class="btn sec" id="close">Alles klar</button>
+  </div></div>`);
+  document.body.appendChild(sh);
+  sh.querySelector('#close').onclick = () => sh.remove();
+  sh.onclick = e => { if (e.target === sh) sh.remove(); };
+}
+
+function installCard(compact) {
+  if (isStandalone()) return null;
+  if (compact && LS.get('hideInstall', 0)) return null;
+  const c = el(`<div class="card accent">
+    <h2>🐷 App installieren</h2>
+    <p class="hint" style="margin-top:0">Leg dir Saustall USA PayMe auf den Home-Bildschirm.
+      Dann hast du ein eigenes Symbol, die App startet sofort – und du kannst
+      <b>auch ohne Internet</b> eintragen.</p>
+    <button class="btn" id="inst">Auf dem Home-Bildschirm ablegen</button>
+    ${compact ? '<div style="height:8px"></div><button class="btn sec" id="later">Später</button>' : ''}
+  </div>`);
+  c.querySelector('#inst').onclick = async () => {
+    if (installEvent) {
+      installEvent.prompt();
+      const res = await installEvent.userChoice;
+      installEvent = null;
+      if (res && res.outcome !== 'accepted') installHelp();
+      render();
+    } else installHelp();
+  };
+  if (compact) c.querySelector('#later').onclick = () => { LS.set('hideInstall', 1); render(); };
+  return c;
+}
+
+/* --- Verbindung --- */
+function connectionBanner() {
+  const pend = queue.length;
+  const off = !navigator.onLine;
+  if (!pend && !off) return null;
+  let txt;
+  if (off && pend) {
+    txt = `<b>Kein Internet.</b> ${pend} ${pend === 1 ? 'Eintrag ist' : 'Einträge sind'} auf diesem Handy
+      gespeichert und ${pend === 1 ? 'wird' : 'werden'} automatisch hochgeladen, sobald wieder Verbindung da ist.`;
+  } else if (off) {
+    txt = `<b>Kein Internet.</b> Du kannst trotzdem alles eintragen – es wird automatisch
+      hochgeladen, sobald wieder Verbindung da ist.`;
+  } else {
+    txt = `<b>${pend} ${pend === 1 ? 'Eintrag wartet' : 'Einträge warten'} auf Upload.</b>
+      Wird automatisch erneut versucht.`;
+  }
+  const b = el(`<div class="banner">${txt}</div>`);
+  if (!off) {
+    const btn = el('<button class="btn sec sm" style="margin-top:8px">Jetzt versuchen</button>');
+    btn.onclick = () => sync();
+    b.appendChild(btn);
+  }
+  return b;
+}
+
 function toast(msg, ms) {
   if (!toastBox) { toastBox = el('<div class="toasts"></div>'); document.body.appendChild(toastBox); }
   const t = el('<div class="toast">' + esc(msg) + '</div>');
@@ -225,8 +306,10 @@ async function add(e) {
     await flush();
     setSync('ok', 'gespeichert');
   } catch (err) {
-    setSync('bad', 'wartet');
-    toast('Noch nicht hochgeladen: ' + (err.message || err) + ' – wird erneut versucht', 5000);
+    setSync('bad', navigator.onLine ? 'wartet' : 'offline');
+    // Offline is already explained by the banner — only surprising errors get a toast.
+    if (navigator.onLine) toast('Noch nicht hochgeladen: ' + (err.message || err) + ' – wird erneut versucht', 5000);
+    render();
   }
 }
 
@@ -254,6 +337,12 @@ function render() {
   cfgGuardRender(st);
   const v = $('#view');
   v.innerHTML = '';
+  const conn = connectionBanner();
+  if (conn) v.appendChild(conn);
+  if (tab === 'add') {
+    const ic = installCard(true);
+    if (ic) v.appendChild(ic);
+  }
   if (tab === 'add') v.appendChild(viewAdd(st));
   if (tab === 'balance') v.appendChild(viewBalance(st));
   if (tab === 'history') v.appendChild(viewHistory(st));
@@ -342,7 +431,7 @@ function viewAdd(st) {
   wrap.appendChild(card);
 
   const payer = card.querySelector('#payer');
-  st.people.forEach(p => payer.appendChild(el(`<option value="${p.id}">${esc(p.name)}${p.id === cfg.meId ? ' (me)' : ''}</option>`)));
+  st.people.forEach(p => payer.appendChild(el(`<option value="${p.id}">${esc(p.name)}${p.id === cfg.meId ? ' (ich)' : ''}</option>`)));
   payer.value = draft.payer;
   payer.onchange = () => { draft.payer = payer.value; refresh(); };
 
@@ -641,6 +730,8 @@ function viewPeople(st) {
 /* --- Settings --- */
 function viewSettings(st) {
   const wrap = el('<div></div>');
+  const ic = installCard(false);
+  if (ic) wrap.appendChild(ic);
 
   const c = el(`<div class="card"><h2>Gemeinsame Speicherung</h2>
     <p class="hint" style="margin-top:0">Jeder Eintrag wird als eigene Datei nach
@@ -753,9 +844,17 @@ $('#whoBtn').onclick = () => { tab = cfg.meId ? 'settings' : 'add'; window.scrol
 render();
 setSync('', 'bereit');
 sync(true);
-setInterval(() => { if (document.visibilityState === 'visible') sync(true); }, 45000);
+// Retry quickly while something is still waiting to go up, slowly otherwise.
+(function loop() {
+  const wait = queue.length ? 15000 : 60000;
+  setTimeout(() => {
+    if (document.visibilityState === 'visible' && navigator.onLine) sync(true);
+    loop();
+  }, wait);
+})();
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(true); });
-window.addEventListener('online', () => sync(true));
+window.addEventListener('online', () => { render(); toast('Wieder online – lade hoch …'); sync(true); });
+window.addEventListener('offline', () => { setSync('bad', 'offline'); render(); });
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

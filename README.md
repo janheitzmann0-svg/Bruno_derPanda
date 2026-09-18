@@ -14,8 +14,9 @@ entfällt.
 ## Für alle in der Gruppe
 
 1. Den Link aus der WhatsApp-Gruppe auf dem Handy öffnen.
-2. **iPhone:** Teilen → *Zum Home-Bildschirm*. **Android:** Menü → *App installieren*.
-   Danach verhält sie sich wie eine normale App und geht auch offline.
+2. Auf **🐷 App installieren → Auf dem Home-Bildschirm ablegen** tippen. Falls der
+   Browser nicht von selbst fragt, zeigt die App die passende Anleitung für dein
+   Handy an. Danach verhält sie sich wie eine normale App.
 3. Einmal den **eigenen Namen antippen**. Das ist ab dann dein Konto – du musst
    nie wieder etwas auswählen.
 4. Unter **Einstellungen** den **Gruppen-Code** einfügen, der rumgeschickt wurde.
@@ -39,6 +40,17 @@ entfällt.
 
 Vertippt? Im **Verlauf** kannst du **stornieren**, was du selbst eingetragen hast.
 Gelöscht wird nie etwas – die Stornierung wird als sichtbare Rückbuchung eingetragen.
+
+### Ohne Internet
+
+Du kannst **jederzeit eintragen**, auch ohne Empfang – im Restaurant, im Nationalpark,
+im Flieger. Der Eintrag wird auf dem Handy gespeichert, oben steht dann *„Kein
+Internet – wird automatisch hochgeladen, sobald wieder Verbindung da ist“*.
+
+Sobald wieder Netz da ist, lädt die App **von selbst** hoch: beim Wiederverbinden,
+beim Öffnen der App und sonst regelmäßig im Hintergrund. Du musst nichts drücken.
+Solange noch etwas aussteht, steht die Zahl oben im Banner – und es gibt einen
+Knopf *Jetzt versuchen*, falls du nicht warten willst.
 
 ### Administrator
 
