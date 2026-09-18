@@ -1,14 +1,14 @@
 {
   "name": "Saustall USA PayMe",
   "short_name": "PayMe",
-  "description": "Who owes whom after the USA trip. One bill, many people, dollars converted at one fixed euro rate.",
+  "description": "Wer schuldet wem was nach der USA-Reise. Eine Rechnung, viele Leute, Dollar zu einem festen Euro-Kurs.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0e1117",
   "theme_color": "#11141c",
-  "lang": "en",
+  "lang": "de",
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },

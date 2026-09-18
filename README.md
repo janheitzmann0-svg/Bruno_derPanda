@@ -1,63 +1,59 @@
 # 🐷 Saustall USA PayMe
 
-An installable web app (PWA) for a group that keeps getting **one bill** for
-everybody — as is usual in the US — and needs to know at the end **who owes whom**.
+Damit am Ende klar ist, **wer wem was schuldet**. In den USA kommt meistens
+**eine Rechnung** für alle – einer zahlt, der Rest trägt hier ein, was auf ihn
+entfällt.
 
-* One person pays the whole bill, everyone picks what they owe.
-* Amounts are entered in **US dollars** and converted with **one fixed euro rate**
-  for the whole trip (marked everywhere as *not live*).
-* At the end all debts are added up and **cancelled out against each other**, so
-  the app shows the smallest possible set of payments.
-* The whole group shares **one ledger**, stored as plain JSON files in this
-  repository. Nothing is ever overwritten or deleted.
+* Beträge werden in **US-Dollar** eingetragen und mit **einem festen Euro-Kurs**
+  für die ganze Reise umgerechnet (überall als *kein Live-Kurs* gekennzeichnet).
+* Am Ende werden alle Schulden **zusammengezählt und gegeneinander verrechnet**,
+  so dass am Schluss möglichst wenige Zahlungen übrig bleiben.
+* Die ganze Gruppe teilt sich **ein Konto-Buch**. Nichts wird je überschrieben
+  oder gelöscht.
 
----
+## Für alle in der Gruppe
 
-## For everyone in the group
+1. Den Link aus der WhatsApp-Gruppe auf dem Handy öffnen.
+2. **iPhone:** Teilen → *Zum Home-Bildschirm*. **Android:** Menü → *App installieren*.
+   Danach verhält sie sich wie eine normale App und geht auch offline.
+3. Einmal den **eigenen Namen antippen**. Das ist ab dann dein Konto – du musst
+   nie wieder etwas auswählen.
+4. Unter **Einstellungen** den **Gruppen-Code** einfügen, der rumgeschickt wurde.
+   Ohne ihn kannst du zwar alles anschauen, aber nichts eintragen.
+5. Fertig. Ausgaben unter **Neu** eintragen, Stand jederzeit unter **Übersicht**.
 
-1. Open the link from the WhatsApp group on your phone.
-2. **iPhone:** Share → *Add to Home Screen*. **Android:** menu → *Install app*.
-   It then behaves like a normal app and also works offline.
-3. Open it and **tap your own name** once. That is your account from then on —
-   you never need to choose again.
-4. Go to **Settings** and paste the **group code** that was sent round.
-   Without it you can look, but not add anything.
-5. Done. Log expenses on the **Add** tab, check the **Balance** tab any time.
+### Eine Ausgabe eintragen
 
-### Logging an expense
+* *Wer hat bezahlt?* – der, der die Karte gezückt hat.
+* *Für wen?* – die Leute antippen, um die es geht: nur dich, ein paar, oder alle.
+* *Betrag in US-Dollar* – gleichmäßig geteilt, oder auf **Einzeln** umstellen und
+  jedem seinen eigenen Betrag geben.
+* Speichern. Das war's.
 
-* *Who paid the bill?* — the person who handed over the card.
-* *Who is it for?* — tap the people it covers: only yourself, a few, or everyone.
-* *Amount in US dollars* — split equally, or switch to **Custom** to give each
-  person their own amount.
-* Save. That's it.
+### Übersicht
 
-### The Balance tab
+* Dein eigener Stand – was du zurückbekommst oder noch schuldest.
+* Der Stand von allen.
+* **Wer zahlt an wen** – die kürzeste Liste an Zahlungen, mit der alles beglichen
+  ist. Auf *Bezahlt* tippen, sobald das Geld wirklich geflossen ist.
 
-* Your own total — what you get back, or what you still owe.
-* Every person's net balance.
-* **Who pays whom** — the minimal list of payments that settles the whole group.
-  Tap *Settle* once a payment has actually been made.
+Vertippt? Im **Verlauf** kannst du **stornieren**, was du selbst eingetragen hast.
+Gelöscht wird nie etwas – die Stornierung wird als sichtbare Rückbuchung eingetragen.
 
-Mistakes: in **History** you can **Undo** anything you entered yourself. Nothing
-is ever deleted — the undo is recorded as a visible reversal.
+### Administrator
 
----
+Jan ist Administrator. Nur auf dem Handy, auf dem *Jan* ausgewählt ist, gibt es
+zusätzlich:
 
-## Administrator
-
-Jan is the administrator. On the phone where *Jan* is the chosen account, and
-only there, extra controls appear:
-
-* **People → add a person** at any time, also mid-trip. Somebody added later
-  starts at zero and only shows up in expenses logged from then on.
-* **People → rename** anyone.
-* **Settings → exchange rate** for the whole group.
-* **History → undo any entry**, not just your own.
-
-The administrator is set in `app.js`, in `DEFAULTS.admin` (currently `p_jan`).
+* **Leute → Person hinzufügen**, jederzeit, auch mitten in der Reise. Wer später
+  dazukommt, startet bei null und taucht nur in Ausgaben ab diesem Zeitpunkt auf.
+* **Leute → umbenennen**.
+* **Einstellungen → Wechselkurs** für die ganze Gruppe setzen.
+* **Verlauf → jeden Eintrag stornieren**, nicht nur die eigenen.
 
 ---
+
+## Technical notes (English)
 
 ## Setup (once, before the trip)
 
