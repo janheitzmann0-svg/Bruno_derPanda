@@ -1,0 +1,3 @@
+# Local only — never commit a token
+.env
+*.token
