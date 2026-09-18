@@ -2,7 +2,7 @@
    Every entry is written as its own immutable file under data/entries/,
    so concurrent writers never conflict and nothing is ever overwritten. */
 
-const APP_VERSION = 8;
+const APP_VERSION = 9;
 
 const DEFAULTS = {
   owner: 'janheitzmann0-svg',
@@ -250,7 +250,7 @@ function explain(status, body) {
   if (status === 401) return 'Der Gruppen-Code ist ungültig oder abgelaufen. Bitte neu eintragen.';
   if (status === 403) {
     if (/rate limit/i.test(body || '')) return 'GitHub-Limit erreicht. In ein paar Minuten nochmal versuchen.';
-    return 'Der Gruppen-Code darf nicht schreiben. Er braucht bei den Berechtigungen "Contents: Read and write".';
+    return 'Der Gruppen-Code darf nur lesen, nicht schreiben. Er muss neu angelegt werden: entweder als klassischer Token mit Haken bei „public_repo“, oder als Fine-grained Token mit diesem Repository unter „Only select repositories“ und „Contents: Read and write“.';
   }
   if (status === 404) return 'Repository nicht gefunden – oder der Gruppen-Code hat keinen Zugriff darauf. Prüfe Besitzer, Repository und ob der Code für genau dieses Repository gilt.';
   if (status === 409) return 'Gerade hat jemand anderes gespeichert. Wird automatisch nochmal versucht.';
@@ -942,8 +942,9 @@ function viewSettings(st) {
     <label>Gruppen-Code</label>
     <input id="tok" type="password" placeholder="github_pat_…" value="${esc(cfg.token || '')}">
     <div class="hint">Zum Anschauen brauchst du ihn nicht. Zum <b>Eintragen</b> schon –
-      es ist derselbe Code für alle, der in der WhatsApp-Gruppe rumgeschickt wird.
-      Er bleibt nur auf diesem Handy und wird nie in das Repository geschrieben.</div>
+      es ist derselbe Code für alle; ${isAdmin() ? 'du legst ihn unten an und schickst ihn in die Gruppe' : 'du bekommst ihn von ' + esc((st.byId[cfg.admin] || {}).name || 'Jan')}.
+      Er bleibt nur auf diesem Handy und wird nie in das Repository geschrieben.
+      Einfügen genügt – gespeichert und geprüft wird automatisch.</div>
     <div style="height:12px"></div>
     <div class="row">
       <div><label>Besitzer</label><input id="own" value="${esc(cfg.owner)}"></div>
@@ -960,9 +961,23 @@ function viewSettings(st) {
     <button class="btn sec" id="testBtn">Verbindung testen</button>
     <div id="testOut" style="margin-top:8px">${testResult}</div>
   </div>`);
-  c.querySelector('#testBtn').onclick = () => testConnection();
+  const tokField = c.querySelector('#tok');
+  let tokTimer = null;
+  const takeToken = () => {
+    const v = tokField.value.trim();
+    if (v === (cfg.token || '')) return false;
+    cfg.token = v; saveCfg(); noteError(null, null);
+    return true;
+  };
+  tokField.addEventListener('input', () => {
+    takeToken();
+    clearTimeout(tokTimer);
+    // A pasted code is long; check it right away and show the verdict below.
+    if ((cfg.token || '').length >= 20) tokTimer = setTimeout(() => testConnection(), 500);
+  });
+  c.querySelector('#testBtn').onclick = () => { takeToken(); testConnection(); };
   c.querySelector('#saveCfg').onclick = async () => {
-    cfg.token = c.querySelector('#tok').value.trim();
+    takeToken();
     cfg.owner = c.querySelector('#own').value.trim();
     cfg.repo = c.querySelector('#rep').value.trim();
     cfg.branch = c.querySelector('#br').value.trim() || 'main';
@@ -979,6 +994,28 @@ function viewSettings(st) {
     wrap.appendChild(phoneCard(st));
     return wrap;
   }
+
+  const tokenUrl = 'https://github.com/settings/tokens/new?description=' + encodeURIComponent('Saustall USA PayMe') + '&scopes=public_repo';
+  const mk = el(`<div class="card"><h2>Gruppen-Code anlegen <span class="tag">admin</span></h2>
+    <p class="hint" style="margin-top:0">Der Gruppen-Code ist ein GitHub-Zugangsschlüssel, mit dem die App Einträge in
+      <code>${esc(cfg.owner)}/${esc(cfg.repo)}</code> schreiben darf. Anlegen geht nur auf github.com – dauert zwei Minuten.
+      Danach den <b>einen</b> Code an alle schicken.</p>
+    <a class="btn" href="${tokenUrl}" target="_blank" rel="noopener">Code auf GitHub anlegen (vorausgefüllt)</a>
+    <ol class="steps" style="margin-top:12px">
+      <li>Falls nötig bei GitHub anmelden.</li>
+      <li><b>Expiration</b>: ein Datum kurz nach der Reise wählen.</li>
+      <li>Der Haken bei <b>public_repo</b> ist schon gesetzt – sonst nichts anhaken.</li>
+      <li>Unten auf <b>Generate token</b>. Den Code (beginnt mit <code>ghp_</code>) kopieren – er wird nur einmal angezeigt.</li>
+      <li>Hier oben ins Feld <b>Gruppen-Code</b> einfügen. Die App prüft ihn sofort, auch das Schreiben.</li>
+    </ol>
+    <details><summary class="muted" style="font-size:13px;cursor:pointer">Strenger: Code nur für dieses eine Repository</summary>
+      <p class="hint">github.com → Settings → Developer settings → Personal access tokens → <b>Fine-grained tokens</b> → Generate new token.
+      <b>Repository access: Only select repositories</b> → <code>${esc(cfg.repo)}</code> (nicht „Public repositories“ – das ist nur lesend!).
+      <b>Permissions → Repository permissions → Contents: Read and write</b>. Generate, Code kopieren, oben einfügen.</p>
+    </details>
+    <div class="hint">Nach der Reise den Code auf GitHub löschen – dann funktioniert er auf allen Handys gleichzeitig nicht mehr.</div>
+  </div>`);
+  wrap.appendChild(mk);
 
   const c2 = el(`<div class="card"><h2>Wechselkurs <span class="tag">admin</span></h2>
     <p class="hint" style="margin-top:0">Ein fester Kurs für die ganze Reise – <b>kein Live-Kurs</b>.
