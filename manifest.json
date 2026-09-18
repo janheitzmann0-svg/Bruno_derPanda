@@ -1,7 +1,7 @@
 {
-  "name": "Trip Split — group expenses",
-  "short_name": "Trip Split",
-  "description": "Split one restaurant bill across a group, in dollars with a fixed euro rate, and see who owes whom at the end.",
+  "name": "Saustall USA PayMe",
+  "short_name": "PayMe",
+  "description": "Who owes whom after the USA trip. One bill, many people, dollars converted at one fixed euro rate.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

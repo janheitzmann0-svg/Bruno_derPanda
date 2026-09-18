@@ -7,6 +7,7 @@ const DEFAULTS = {
   repo: 'Bruno_derPanda',
   branch: 'main',
   dir: 'data/entries',
+  admin: 'p_jan',        // Jan — may add/rename people, set the rate and undo anything
   rate: 0.92,            // EUR per USD, static for the whole trip
   rateLabel: 'set at setup'
 };
@@ -35,6 +36,8 @@ const usd = n => '$' + (Math.abs(n) < 0.005 ? 0 : n).toFixed(2);
 const eur = n => '€' + (Math.abs(n) < 0.005 ? 0 : n).toFixed(2);
 
 let toastBox = null;
+const isAdmin = () => cfg.meId === cfg.admin;
+
 function toast(msg, ms) {
   if (!toastBox) { toastBox = el('<div class="toasts"></div>'); document.body.appendChild(toastBox); }
   const t = el('<div class="toast">' + esc(msg) + '</div>');
@@ -47,7 +50,7 @@ let nagged = 0;
 function nagToken() {
   if (Date.now() - nagged < 60000) return;
   nagged = Date.now();
-  toast('Saved on this phone only — add the group token in Settings to share it', 4500);
+  toast('Saved on this phone only — paste the group code in Settings so everyone sees it', 5000);
 }
 
 /* ---------------- derived state ---------------- */
@@ -65,6 +68,7 @@ function derive() {
   for (const e of live) {
     if (e.type === 'person') { const p = { id: e.id, name: e.name, ts: e.ts }; people.push(p); byId[e.id] = p; }
     if (e.type === 'rate' && e.eurPerUsd > 0) { rate = e.eurPerUsd; rateLabel = e.label || ''; rateTs = e.ts; }
+    if (e.type === 'rename' && byId[e.target]) byId[e.target].name = e.name;
   }
   people.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -89,7 +93,7 @@ function derive() {
     }
   }
 
-  return { all, live, voided, people, byId, net, pair, rate, rateLabel, rateTs };
+  return { all, live, voided, people, byId, net, pair, rate, rateLabel, rateTs, rateSet: rateTs > 0 };
 }
 
 /* Net every pair off against each other, then minimise the number of transfers. */
@@ -125,6 +129,7 @@ function api(path, opts) {
 }
 
 function setSync(state, text) {
+  if (!$('#dot')) return;
   $('#dot').className = 'dot ' + state;
   $('#syncTxt').textContent = text;
 }
@@ -189,13 +194,12 @@ async function flush() {
 
 async function sync(silent) {
   if (busy) return;
-  if (!cfg.token) { setSync('bad', 'no token'); if (!silent) toast('Add your access token in Settings'); return; }
   busy = true;
   try {
     setSync('busy', 'syncing');
-    await flush();
+    if (cfg.token) await flush();
     const n = await pull();
-    setSync('ok', 'synced ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    setSync(cfg.token ? 'ok' : 'warn', (cfg.token ? 'synced ' : 'read-only ') + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     render();
     if (n && !silent) toast(n + ' new entr' + (n === 1 ? 'y' : 'ies'));
   } catch (err) {
@@ -230,6 +234,7 @@ function summaryLine(e) {
   if (e.type === 'person') return e.name;
   if (e.type === 'rate') return e.eurPerUsd + ' EUR/USD';
   if (e.type === 'void') return 'undo ' + e.target;
+  if (e.type === 'rename') return 'renamed to ' + e.name;
   if (e.type === 'settle') return `${nm(e.from)} paid ${nm(e.to)} ${usd(e.usd)}`;
   if (e.type === 'expense') {
     const tot = (e.shares || []).reduce((a, s) => a + s.usd, 0);
@@ -258,14 +263,20 @@ function render() {
 }
 
 function cfgGuardRender(st) {
-  $('#title').textContent = 'Trip Split';
+  document.title = 'Saustall USA PayMe';
 }
 
 function rateNote(st) {
-  const d = st.rateTs ? new Date(st.rateTs).toLocaleDateString() : null;
-  return `<div class="banner"><b>Static exchange rate:</b> $1 = ${st.rate.toFixed(4)} €
-    ${d ? '· fixed on ' + d : ''} ${st.rateLabel ? '· ' + esc(st.rateLabel) : ''}<br>
-    This is <b>not a live rate</b> — it is a fixed value for the whole trip. Change it in Settings.</div>`;
+  if (!st.rateSet) {
+    return `<div class="banner err"><b>No exchange rate set yet.</b> Euro amounts are shown with a
+      placeholder of ${st.rate.toFixed(4)} €&nbsp;per&nbsp;$1.
+      ${isAdmin() ? 'Set the real rate in <b>Settings</b> before the trip starts.'
+                  : 'Ask ' + esc((st.byId[cfg.admin] || {}).name || 'the administrator') + ' to set it in the app.'}
+      Dollar amounts are unaffected.</div>`;
+  }
+  const d = new Date(st.rateTs).toLocaleDateString();
+  return `<div class="banner"><b>Fixed exchange rate:</b> $1 = ${st.rate.toFixed(4)} € · set on ${d}${st.rateLabel ? ' · ' + esc(st.rateLabel) : ''}<br>
+    This is <b>not a live rate</b> — one fixed value for the whole trip.</div>`;
 }
 
 /* --- Add --- */
@@ -535,7 +546,7 @@ function viewHistory(st) {
       <div class="g"><div class="t">${title}${dead ? '<span class="tag">undone</span>' : ''}</div>
       <div class="s">${sub} · ${when}</div></div>
       <div class="amt">${eur(amount * st.rate)}<small>${usd(amount)}</small></div></div>`);
-    if (!dead) {
+    if (!dead && (isAdmin() || (e.by && e.by === cfg.meId))) {
       const b = el('<button class="btn danger sm">Undo</button>');
       b.onclick = async () => {
         if (!confirm('Undo this entry?\n\nNothing is deleted — a reversal is recorded and stays visible in the history.')) return;
@@ -546,7 +557,8 @@ function viewHistory(st) {
     }
     l.appendChild(row);
   });
-  c.appendChild(el('<div class="hint">Entries can never be deleted. "Undo" writes a reversal that everyone can see.</div>'));
+  c.appendChild(el(`<div class="hint">Entries can never be deleted. "Undo" writes a reversal that stays visible to everyone.
+    You can undo what you entered yourself${isAdmin() ? '; as administrator you can undo anything' : ''}.</div>`));
   wrap.appendChild(c);
   return wrap;
 }
@@ -554,33 +566,56 @@ function viewHistory(st) {
 /* --- People --- */
 function viewPeople(st) {
   const wrap = el('<div></div>');
+  const admin = isAdmin();
+
   const c = el(`<div class="card"><h2>Group (${st.people.length})</h2>
-    <div class="list" id="l"></div>
-    <div style="height:12px"></div>
-    <label>Add a person</label>
-    <div class="row"><input id="nm" placeholder="Name" autocomplete="off">
-      <button class="btn sm" id="addBtn" style="flex:0 0 auto">Add</button></div>
-    <div style="height:10px"></div>
-    <details><summary class="muted" style="font-size:13px;cursor:pointer">Add many at once</summary>
-      <div style="height:8px"></div>
-      <textarea id="bulk" rows="6" placeholder="One name per line"></textarea>
-      <div style="height:8px"></div>
-      <button class="btn sec" id="bulkBtn">Add all</button>
-    </details>
-  </div>`);
+    <div class="list" id="l"></div></div>`);
   const l = c.querySelector('#l');
   if (!st.people.length) l.appendChild(el('<div class="hint" style="margin:0">Nobody yet.</div>'));
+
   st.people.forEach(p => {
     const v = r2(st.net[p.id] || 0);
-    const row = el(`<div class="item"><div class="g"><div class="t">${esc(p.name)}${p.id === cfg.meId ? '<span class="tag">you</span>' : ''}</div>
+    const row = el(`<div class="item"><div class="g">
+      <div class="t">${esc(p.name)}${p.id === cfg.meId ? '<span class="tag">you</span>' : ''}${p.id === cfg.admin ? '<span class="tag">admin</span>' : ''}</div>
       <div class="s">${v >= 0 ? 'gets back' : 'owes'} ${eur(Math.abs(v) * st.rate)}</div></div></div>`);
-    if (p.id !== cfg.meId) {
-      const b = el('<button class="btn sec sm">That’s me</button>');
+    if (!cfg.meId) {
+      const b = el('<button class="btn sec sm">That\u2019s me</button>');
       b.onclick = () => { cfg.meId = p.id; saveCfg(); draft.payer = p.id; draft.sel = [p.id]; render(); };
+      row.appendChild(b);
+    } else if (admin) {
+      const b = el('<button class="btn sec sm">Rename</button>');
+      b.onclick = async () => {
+        const n = prompt('New name for ' + p.name, p.name);
+        if (!n || !n.trim() || n.trim() === p.name) return;
+        await add({ type: 'rename', target: p.id, name: n.trim() });
+        toast('Renamed');
+      };
       row.appendChild(b);
     }
     l.appendChild(row);
   });
+  wrap.appendChild(c);
+
+  if (!admin) {
+    wrap.appendChild(el(`<div class="hint" style="padding:0 2px">The group list is managed by
+      ${esc((st.byId[cfg.admin] || {}).name || 'the administrator')}. Ask them if somebody is missing.</div>`));
+    return wrap;
+  }
+
+  const ac = el(`<div class="card"><h2>Administrator</h2>
+    <p class="hint" style="margin-top:0">You can add people at any time — also in the middle of the trip.
+      A person added later starts at zero and only appears in expenses logged from then on.</p>
+    <label>Add a person</label>
+    <div class="row"><input id="nm" placeholder="Name" autocomplete="off">
+      <button class="btn sm" id="addBtn" style="flex:0 0 auto">Add</button></div>
+    <div style="height:12px"></div>
+    <details><summary class="muted" style="font-size:13px;cursor:pointer">Add several at once</summary>
+      <div style="height:8px"></div>
+      <textarea id="bulk" rows="5" placeholder="One name per line"></textarea>
+      <div style="height:8px"></div>
+      <button class="btn sec" id="bulkBtn">Add all</button>
+    </details>
+  </div>`);
 
   const addName = async (name) => {
     name = name.trim();
@@ -588,16 +623,16 @@ function viewPeople(st) {
     if (st.people.some(p => p.name.toLowerCase() === name.toLowerCase())) { toast(name + ' already exists'); return; }
     await add({ type: 'person', name });
   };
-  const nmInput = c.querySelector('#nm');
-  c.querySelector('#addBtn').onclick = async () => { const n = nmInput.value; nmInput.value = ''; await addName(n); };
-  nmInput.onkeydown = e => { if (e.key === 'Enter') c.querySelector('#addBtn').click(); };
-  c.querySelector('#bulkBtn').onclick = async () => {
-    const lines = c.querySelector('#bulk').value.split('\n').map(s => s.trim()).filter(Boolean);
-    c.querySelector('#bulk').value = '';
+  const nmInput = ac.querySelector('#nm');
+  ac.querySelector('#addBtn').onclick = async () => { const n = nmInput.value; nmInput.value = ''; await addName(n); };
+  nmInput.onkeydown = e => { if (e.key === 'Enter') ac.querySelector('#addBtn').click(); };
+  ac.querySelector('#bulkBtn').onclick = async () => {
+    const lines = ac.querySelector('#bulk').value.split('\n').map(s => s.trim()).filter(Boolean);
+    ac.querySelector('#bulk').value = '';
     for (const n of lines) await addName(n);
-    toast(lines.length + ' added');
+    if (lines.length) toast(lines.length + ' added');
   };
-  wrap.appendChild(c);
+  wrap.appendChild(ac);
   return wrap;
 }
 
@@ -609,9 +644,10 @@ function viewSettings(st) {
     <p class="hint" style="margin-top:0">Every entry is uploaded as its own file to
       <code>${esc(cfg.owner)}/${esc(cfg.repo)}</code> under <code>${esc(cfg.dir)}</code>.
       Nothing is ever overwritten or deleted, so two people can enter things at the same time without clashing.</p>
-    <label>Access token</label>
+    <label>Group code</label>
     <input id="tok" type="password" placeholder="github_pat_…" value="${esc(cfg.token || '')}">
-    <div class="hint">Needed to upload. Ask whoever set up the trip for it — it is the same token for the whole group.
+    <div class="hint">Reading works without it. You need the code to <b>add</b> anything —
+      it is the same code for everyone, sent round in the WhatsApp group.
       It is stored on this phone only and is never written into the repository.</div>
     <div style="height:12px"></div>
     <div class="row">
@@ -633,7 +669,16 @@ function viewSettings(st) {
   };
   wrap.appendChild(c);
 
-  const c2 = el(`<div class="card"><h2>Exchange rate</h2>
+  if (!isAdmin()) {
+    wrap.appendChild(el(`<div class="card"><h2>Exchange rate</h2>
+      <div class="split"><span>1 US dollar</span><span class="amt">${st.rate.toFixed(4)} €</span></div>
+      <div class="hint">Fixed for the whole trip and <b>not live</b>. Only
+        ${esc((st.byId[cfg.admin] || {}).name || 'the administrator')} can change it.</div></div>`));
+    wrap.appendChild(phoneCard(st));
+    return wrap;
+  }
+
+  const c2 = el(`<div class="card"><h2>Exchange rate <span class="tag">admin</span></h2>
     <p class="hint" style="margin-top:0">One fixed rate for the whole trip — <b>not live</b>.
       Set it once at the start; over 10 days the drift is negligible.</p>
     <label>Euro per 1 US dollar</label>
@@ -654,6 +699,12 @@ function viewSettings(st) {
   };
   wrap.appendChild(c2);
 
+  wrap.appendChild(phoneCard(st));
+  return wrap;
+}
+
+function phoneCard(st) {
+  const wrap = el('<div></div>');
   const me = st.byId[cfg.meId];
   const c3 = el(`<div class="card"><h2>This phone</h2>
     <div class="split"><span>I am</span><span>${me ? esc(me.name) : '<span class="muted">not set</span>'}</span></div>
@@ -676,7 +727,7 @@ function viewSettings(st) {
     const blob = new Blob([JSON.stringify({ exported: new Date().toISOString(), rate: st.rate, entries: st.all }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'trip-split-backup.json';
+    a.download = 'saustall-payme-backup.json';
     a.click();
   };
   c3.querySelector('#reset').onclick = () => {
