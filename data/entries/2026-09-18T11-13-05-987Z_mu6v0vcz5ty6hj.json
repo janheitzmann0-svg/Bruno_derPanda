@@ -1,0 +1,15 @@
+{
+  "type": "expense",
+  "payer": "p_jan",
+  "note": "Test",
+  "shares": [
+    {
+      "p": "p_gunter",
+      "usd": 0.01
+    }
+  ],
+  "rate": 0.8706,
+  "id": "mu6v0vcz5ty6hj",
+  "ts": 1789729985987,
+  "by": "p_jan"
+}
