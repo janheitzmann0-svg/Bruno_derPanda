@@ -14,7 +14,8 @@ entfällt.
 ## Für alle in der Gruppe
 
 1. Den Link aus der WhatsApp-Gruppe auf dem Handy öffnen.
-2. Auf **🐷 App installieren → Auf dem Home-Bildschirm ablegen** tippen. Falls der
+2. Auf **🐷 App installieren → Auf dem Home-Bildschirm ablegen** tippen (oder oben
+   rechts auf das **⤓**-Symbol). Falls der
    Browser nicht von selbst fragt, zeigt die App die passende Anleitung für dein
    Handy an. Danach verhält sie sich wie eine normale App.
 3. Einmal den **eigenen Namen antippen**. Das ist ab dann dein Konto – du musst
@@ -60,7 +61,9 @@ zusätzlich:
 * **Leute → Person hinzufügen**, jederzeit, auch mitten in der Reise. Wer später
   dazukommt, startet bei null und taucht nur in Ausgaben ab diesem Zeitpunkt auf.
 * **Leute → umbenennen**.
-* **Einstellungen → Wechselkurs** für die ganze Gruppe setzen.
+* **Einstellungen → Wechselkurs** für die ganze Gruppe setzen. *Aktuellen Kurs aus
+  dem Internet holen* trägt den heutigen EZB-Kurs ein; mit *Kurs für die ganze
+  Gruppe setzen* wird er dann für die Reise eingefroren.
 * **Verlauf → jeden Eintrag stornieren**, nicht nur die eigenen.
 
 ---
@@ -99,9 +102,11 @@ delete the token on GitHub and it stops working on all phones at once.
 
 ### 3. Set the rate
 
-Open the app as Jan → **Settings → Exchange rate** → enter the euro-per-dollar
-rate you want to use for the whole trip. Until that is done, every screen shows
-a red warning that a placeholder is being used.
+Open the app as Jan → **Einstellungen → Wechselkurs** → *Aktuellen Kurs aus dem
+Internet holen* (ECB reference rate via frankfurter.app, with open.er-api.com as
+a fallback) → *Kurs für die ganze Gruppe setzen*. The value is then frozen for
+the trip; it is never refreshed on its own. Until it is set, every screen shows a
+red warning that a placeholder is being used.
 
 ---
 

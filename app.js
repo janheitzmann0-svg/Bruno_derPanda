@@ -72,6 +72,16 @@ function installHelp() {
   sh.onclick = e => { if (e.target === sh) sh.remove(); };
 }
 
+async function doInstall() {
+  if (installEvent) {
+    installEvent.prompt();
+    const res = await installEvent.userChoice;
+    installEvent = null;
+    if (res && res.outcome !== 'accepted') installHelp();
+    render();
+  } else installHelp();
+}
+
 function installCard(compact) {
   if (isStandalone()) return null;
   if (compact && LS.get('hideInstall', 0)) return null;
@@ -83,15 +93,7 @@ function installCard(compact) {
     <button class="btn" id="inst">Auf dem Home-Bildschirm ablegen</button>
     ${compact ? '<div style="height:8px"></div><button class="btn sec" id="later">Später</button>' : ''}
   </div>`);
-  c.querySelector('#inst').onclick = async () => {
-    if (installEvent) {
-      installEvent.prompt();
-      const res = await installEvent.userChoice;
-      installEvent = null;
-      if (res && res.outcome !== 'accepted') installHelp();
-      render();
-    } else installHelp();
-  };
+  c.querySelector('#inst').onclick = doInstall;
   if (compact) c.querySelector('#later').onclick = () => { LS.set('hideInstall', 1); render(); };
   return c;
 }
@@ -351,6 +353,7 @@ function render() {
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   const me = st.byId[cfg.meId];
   $('#whoBtn').textContent = me ? me.name : 'Wer bin ich?';
+  $('#instBtn').classList.toggle('hidden', isStandalone());
 }
 
 function cfgGuardRender(st) {
@@ -773,17 +776,46 @@ function viewSettings(st) {
 
   const c2 = el(`<div class="card"><h2>Wechselkurs <span class="tag">admin</span></h2>
     <p class="hint" style="margin-top:0">Ein fester Kurs für die ganze Reise – <b>kein Live-Kurs</b>.
-      Einmal am Anfang setzen; über 10 Tage ist die Schwankung zu vernachlässigen.</p>
+      Einmal am Anfang holen und setzen; über 10 Tage ist die Schwankung zu vernachlässigen.
+      Danach bleibt der Wert eingefroren, bis du ihn selbst änderst.</p>
     <label>Euro pro 1 US-Dollar</label>
     <input id="rate" type="number" step="0.0001" min="0" value="${st.rate}">
     <div style="height:10px"></div>
     <label>Notiz (optional)</label>
     <input id="rlab" placeholder="z. B. EZB-Kurs, 12. Sept." value="${esc(st.rateLabel || '')}">
     <div style="height:12px"></div>
+    <button class="btn sec" id="loadRate">Aktuellen Kurs aus dem Internet holen</button>
+    <div style="height:8px"></div>
     <button class="btn sec" id="saveRate">Kurs für die ganze Gruppe setzen</button>
     <div class="hint">Das ändert für alle, wie die Beträge in Euro angezeigt werden.
       Die Dollar-Beträge bleiben genau so, wie sie eingetragen wurden.</div>
   </div>`);
+  c2.querySelector('#loadRate').onclick = async () => {
+    const btn = c2.querySelector('#loadRate');
+    btn.disabled = true; btn.textContent = 'hole Kurs …';
+    const sources = [
+      { url: 'https://api.frankfurter.app/latest?from=USD&to=EUR',
+        pick: j => ({ rate: j.rates && j.rates.EUR, date: j.date, src: 'EZB-Kurs' }) },
+      { url: 'https://open.er-api.com/v6/latest/USD',
+        pick: j => ({ rate: j.rates && j.rates.EUR, date: (j.time_last_update_utc || '').slice(5, 16), src: 'Marktkurs' }) }
+    ];
+    for (const s of sources) {
+      try {
+        const r = await fetch(s.url, { cache: 'no-store' });
+        if (!r.ok) continue;
+        const got = s.pick(await r.json());
+        if (!(got.rate > 0)) continue;
+        c2.querySelector('#rate').value = Math.round(got.rate * 10000) / 10000;
+        c2.querySelector('#rlab').value = got.src + ' vom ' + got.date;
+        btn.disabled = false; btn.textContent = 'Aktuellen Kurs aus dem Internet holen';
+        toast('Kurs geholt: ' + fmt(got.rate, 4) + ' € pro 1 $ – jetzt unten bestätigen', 5000);
+        return;
+      } catch (err) { /* nächste Quelle */ }
+    }
+    btn.disabled = false; btn.textContent = 'Aktuellen Kurs aus dem Internet holen';
+    toast('Kurs konnte nicht geladen werden – bitte von Hand eintragen', 5000);
+  };
+
   c2.querySelector('#saveRate').onclick = async () => {
     const v = parseFloat(c2.querySelector('#rate').value);
     if (!(v > 0)) { toast('Bitte einen gültigen Kurs eingeben'); return; }
@@ -839,6 +871,7 @@ function phoneCard(st) {
 document.querySelectorAll('nav button').forEach(b => {
   b.onclick = () => { tab = b.dataset.tab; window.scrollTo(0, 0); render(); };
 });
+$('#instBtn').onclick = doInstall;
 $('#whoBtn').onclick = () => { tab = cfg.meId ? 'settings' : 'add'; window.scrollTo(0, 0); render(); };
 
 render();
