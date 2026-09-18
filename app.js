@@ -2,6 +2,8 @@
    Every entry is written as its own immutable file under data/entries/,
    so concurrent writers never conflict and nothing is ever overwritten. */
 
+const APP_VERSION = 7;
+
 const DEFAULTS = {
   owner: 'janheitzmann0-svg',
   repo: 'Bruno_derPanda',
@@ -443,6 +445,39 @@ async function testConnection() {
   sync();
 }
 
+/* ---------------- Selbst-Aktualisierung ---------------- */
+
+let updateReady = false;
+let swReg = null;
+
+function updateBanner() {
+  if (!updateReady) return null;
+  const b = el(`<div class="banner"><b>Neue Version verfügbar.</b>
+    Einmal neu laden, dann bist du auf dem gleichen Stand wie die anderen.</div>`);
+  const btn = el('<button class="btn sm" style="margin-top:8px">Jetzt neu laden</button>');
+  btn.onclick = () => location.reload();
+  b.appendChild(btn);
+  return b;
+}
+
+/* Wipes the cached app files and the service worker, then reloads. Entries,
+   the group code and the chosen name all survive — this is the "reinstall"
+   without actually removing anything from the home screen. */
+async function hardReload() {
+  if (queue.length && !confirm(queue.length + ' Einträge warten noch auf den Upload. Trotzdem neu laden? Sie bleiben gespeichert und gehen nicht verloren.')) return;
+  toast('Lade neu …');
+  try {
+    if ('caches' in window) {
+      for (const k of await caches.keys()) await caches.delete(k);
+    }
+  } catch (err) { /* nichts zu leeren */ }
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    for (const r of regs) await r.unregister();
+  } catch (err) { /* kein Service Worker */ }
+  location.replace(location.pathname + '?v=' + Date.now());
+}
+
 /* ---------------- views ---------------- */
 
 let draft = { payer: null, sel: [], total: '', note: '', equal: true, custom: {} };
@@ -452,6 +487,8 @@ function render() {
   cfgGuardRender(st);
   const v = $('#view');
   v.innerHTML = '';
+  const upd = updateBanner();
+  if (upd) v.appendChild(upd);
   const conn = connectionBanner();
   if (conn) v.appendChild(conn);
   if (tab === 'add') {
@@ -955,11 +992,16 @@ function phoneCard(st) {
     <div class="split"><span>Ich bin</span><span>${me ? esc(me.name) : '<span class="muted">nicht gesetzt</span>'}</span></div>
     <div class="split"><span>Bekannte Einträge</span><span>${st.all.length}</span></div>
     <div class="split"><span>Wartet auf Upload</span><span>${queue.length}</span></div>
+    <div class="split"><span>App-Version</span><span>${APP_VERSION}</span></div>
     <div style="height:12px"></div>
     <div class="row">
       <button class="btn sec" id="resync">Jetzt synchronisieren</button>
       <button class="btn sec" id="changeMe">Anderen Namen wählen</button>
     </div>
+    <div style="height:8px"></div>
+    <button class="btn sec" id="reload">App aktualisieren (neu laden)</button>
+    <div class="hint">Holt die neueste Version. Dein Name, der Gruppen-Code und alle
+      Einträge bleiben erhalten – ein Löschen und Neuinstallieren ist dafür nicht nötig.</div>
     <div style="height:8px"></div>
     <button class="btn sec" id="export">Sicherung herunterladen (JSON)</button>
     <div style="height:8px"></div>
@@ -967,6 +1009,7 @@ function phoneCard(st) {
     <div class="hint">Das leert nur die lokale Kopie – die gemeinsamen Daten im Repository bleiben unberührt und sind nach dem nächsten Synchronisieren wieder da.</div>
   </div>`);
   c3.querySelector('#resync').onclick = () => sync();
+  c3.querySelector('#reload').onclick = hardReload;
   c3.querySelector('#changeMe').onclick = () => { cfg.meId = null; saveCfg(); tab = 'add'; render(); };
   c3.querySelector('#export').onclick = () => {
     const blob = new Blob([JSON.stringify({ exported: new Date().toISOString(), rate: st.rate, entries: st.all }, null, 2)], { type: 'application/json' });
@@ -1010,5 +1053,34 @@ window.addEventListener('online', () => { render(); toast('Wieder online – lad
 window.addEventListener('offline', () => { setSync('bad', 'offline'); render(); });
 
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  window.addEventListener('load', async () => {
+    try {
+      swReg = await navigator.serviceWorker.register('sw.js');
+      swReg.addEventListener('updatefound', () => {
+        const fresh = swReg.installing;
+        if (!fresh) return;
+        fresh.addEventListener('statechange', () => {
+          // Only a *replacement* worker means there is a newer version to show.
+          if (fresh.state === 'installed' && navigator.serviceWorker.controller) {
+            updateReady = true;
+            render();
+          }
+        });
+      });
+    } catch (err) { /* ohne Service Worker läuft die App trotzdem */ }
+  });
+
+  // On a first visit the worker claims the page and fires this too — that is an
+  // installation, not an update, and must not nag people to reload.
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) return;
+    updateReady = true;
+    render();
+  });
+
+  // Check for a new version whenever the app comes back to the foreground.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && swReg) swReg.update().catch(() => {});
+  });
 }

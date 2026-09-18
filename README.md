@@ -42,6 +42,17 @@ entfällt.
 Vertippt? Im **Verlauf** kannst du **stornieren**, was du selbst eingetragen hast.
 Gelöscht wird nie etwas – die Stornierung wird als sichtbare Rückbuchung eingetragen.
 
+### App aktualisieren
+
+Du musst die App **nie löschen und neu installieren**. Kommt eine neue Version,
+erscheint oben ein Banner *„Neue Version verfügbar – Jetzt neu laden"*. Einmal
+antippen, fertig.
+
+Falls doch mal etwas hakt: **Einstellungen → App aktualisieren (neu laden)**.
+Das holt alles frisch. Dein Name, der Gruppen-Code und sämtliche Einträge bleiben
+erhalten. Unter *Dieses Handy* steht die **App-Version** – so könnt ihr vergleichen,
+ob alle auf demselben Stand sind.
+
 ### Ohne Internet
 
 Du kannst **jederzeit eintragen**, auch ohne Empfang – im Restaurant, im Nationalpark,

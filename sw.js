@@ -1,6 +1,6 @@
 /* App-shell cache. Trip data is never cached here — it always goes to the
    network so a phone coming back online sees the group's latest entries. */
-const CACHE = 'saustall-payme-v6';
+const CACHE = 'saustall-payme-v7';
 const SHELL = ['./', './index.html', './app.js', './manifest.json',
                './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
@@ -21,8 +21,11 @@ self.addEventListener('fetch', e => {
   if (url.origin !== self.location.origin) return;
 
   // Network-first so a redeploy reaches everyone, cache as offline fallback.
+  // no-store bypasses the browser's own HTTP cache, which would otherwise keep
+  // serving yesterday's app.js for as long as GitHub Pages' max-age says.
+  const fresh = new Request(e.request.url, { cache: 'no-store', credentials: 'same-origin' });
   e.respondWith(
-    fetch(e.request)
+    fetch(fresh)
       .then(res => {
         const copy = res.clone();
         caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
