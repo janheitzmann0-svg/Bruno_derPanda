@@ -24,6 +24,7 @@ const saveCfg = () => LS.set('cfg', cfg);
 let entries = LS.get('entries', {});      // id -> entry
 let files = LS.get('files', {});          // filename -> entry id (immutable, so cacheable)
 let queue = LS.get('queue', []);          // entries written offline, awaiting push
+let lastError = LS.get('lastError', null); // {ts, status, msg} of the last failed upload
 let tab = 'add';
 let busy = false;
 
@@ -102,6 +103,25 @@ function installCard(compact) {
 function connectionBanner() {
   const pend = queue.length;
   const off = !navigator.onLine;
+
+  if (!cfg.token) {
+    const b = el(`<div class="banner err"><b>Kein Gruppen-Code eingetragen.</b>
+      Du siehst zwar alles, aber deine Einträge bleiben nur auf diesem Handy –
+      niemand sonst sieht sie. Trag den Code unter <b>Einstellungen</b> ein.</div>`);
+    const btn = el('<button class="btn sec sm" style="margin-top:8px">Zu den Einstellungen</button>');
+    btn.onclick = () => { tab = 'settings'; window.scrollTo(0, 0); render(); };
+    b.appendChild(btn);
+    return b;
+  }
+
+  if (lastError && pend) {
+    const b = el(`<div class="banner err"><b>Upload klappt nicht.</b><br>${esc(lastError.msg)}</div>`);
+    const btn = el('<button class="btn sec sm" style="margin-top:8px">Nochmal versuchen</button>');
+    btn.onclick = () => sync();
+    b.appendChild(btn);
+    return b;
+  }
+
   if (!pend && !off) return null;
   let txt;
   if (off && pend) {
@@ -213,6 +233,25 @@ function api(path, opts) {
   return fetch('https://api.github.com' + path, o);
 }
 
+/* Turn an HTTP status into something a non-technical person can act on. */
+function explain(status, body) {
+  if (status === 401) return 'Der Gruppen-Code ist ungültig oder abgelaufen. Bitte neu eintragen.';
+  if (status === 403) {
+    if (/rate limit/i.test(body || '')) return 'GitHub-Limit erreicht. In ein paar Minuten nochmal versuchen.';
+    return 'Der Gruppen-Code darf nicht schreiben. Er braucht bei den Berechtigungen "Contents: Read and write".';
+  }
+  if (status === 404) return 'Repository nicht gefunden – oder der Gruppen-Code hat keinen Zugriff darauf. Prüfe Besitzer, Repository und ob der Code für genau dieses Repository gilt.';
+  if (status === 409) return 'Gerade hat jemand anderes gespeichert. Wird automatisch nochmal versucht.';
+  if (status === 422) return 'Eintrag gibt es schon.';
+  if (status >= 500) return 'GitHub hat gerade ein Problem. Wird automatisch nochmal versucht.';
+  return 'Fehler ' + status + (body ? ': ' + body.slice(0, 120) : '');
+}
+
+function noteError(status, msg) {
+  lastError = status == null && msg == null ? null : { ts: Date.now(), status, msg };
+  LS.set('lastError', lastError);
+}
+
 function setSync(state, text) {
   if (!$('#dot')) return;
   $('#dot').className = 'dot ' + state;
@@ -223,7 +262,7 @@ async function pull() {
   const url = `/repos/${cfg.owner}/${cfg.repo}/contents/${cfg.dir}?ref=${encodeURIComponent(cfg.branch)}&t=${Date.now()}`;
   const res = await api(url, { cache: 'no-store' });
   if (res.status === 404) return 0;                 // folder not created yet
-  if (!res.ok) throw new Error('GitHub ' + res.status + ' – ' + (res.status === 401 ? 'Gruppen-Code ungültig' : res.statusText));
+  if (!res.ok) throw new Error(explain(res.status, await res.text().catch(() => '')));
   const list = await res.json();
   const fresh = list.filter(f => f.type === 'file' && f.name.endsWith('.json') && !files[f.name]);
 
@@ -251,18 +290,25 @@ function fileName(e) {
 
 async function pushOne(e) {
   const body = JSON.stringify(e, null, 2) + '\n';
-  const res = await api(`/repos/${cfg.owner}/${cfg.repo}/contents/${cfg.dir}/${fileName(e)}`, {
-    method: 'PUT',
-    body: JSON.stringify({
-      message: `${e.type}: ${summaryLine(e)}`.slice(0, 90),
-      content: btoa(unescape(encodeURIComponent(body))),
-      branch: cfg.branch
-    })
+  const path = `/repos/${cfg.owner}/${cfg.repo}/contents/${cfg.dir}/${fileName(e)}`;
+  const payload = JSON.stringify({
+    message: `${e.type}: ${summaryLine(e)}`.slice(0, 90),
+    content: btoa(unescape(encodeURIComponent(body))),
+    branch: cfg.branch
   });
-  if (res.status === 422) return true;   // already exists — treat as done
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error('GitHub ' + res.status + ': ' + txt.slice(0, 160));
+
+  // 409 means another phone committed a split second earlier; 5xx is GitHub
+  // having a moment. Both are worth retrying before bothering anybody.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await api(path, { method: 'PUT', body: payload });
+    if (res.ok || res.status === 422) { noteError(null, null); return true; }
+    const txt = await res.text().catch(() => '');
+    if ((res.status === 409 || res.status >= 500) && attempt < 3) {
+      await new Promise(r => setTimeout(r, 400 * Math.pow(2, attempt) + Math.random() * 400));
+      continue;
+    }
+    noteError(res.status, explain(res.status, txt));
+    throw new Error(explain(res.status, txt));
   }
   return true;
 }
@@ -328,6 +374,73 @@ function summaryLine(e) {
     return `${nm(e.payer)} paid ${usd(tot)} — ${e.note || 'expense'}`;
   }
   return e.type;
+}
+
+/* Walk the whole chain read -> write and say in plain German where it breaks. */
+let testResult = '';   // survives the re-render that a successful test triggers
+
+async function testConnection() {
+  const rows = [];
+  const draw = () => {
+    testResult = rows.join('');
+    const t = document.querySelector('#testOut');
+    if (t) t.innerHTML = testResult;
+  };
+  const line = (ok, txt, extra) => {
+    rows.push(`<div class="split"><span>${txt}</span><span class="${ok ? 'pos' : 'neg'}" style="font-weight:700">${ok ? '✓' : '✗'}</span></div>`);
+    if (extra) rows.push(`<div class="hint" style="margin:2px 0 8px">${extra}</div>`);
+    draw();
+  };
+  testResult = '<div class="hint">teste …</div>';
+  const t0 = document.querySelector('#testOut');
+  if (t0) t0.innerHTML = testResult;
+
+  if (!navigator.onLine) { line(false, 'Internetverbindung', 'Das Handy meldet: kein Netz.'); return; }
+  line(true, 'Internetverbindung');
+
+  if (!cfg.token) {
+    line(false, 'Gruppen-Code eingetragen',
+      'Oben ins Feld <b>Gruppen-Code</b> einfügen und auf <b>Speichern &amp; synchronisieren</b> tippen.');
+    return;
+  }
+  line(true, 'Gruppen-Code eingetragen');
+
+  try {
+    const r = await api(`/repos/${cfg.owner}/${cfg.repo}`);
+    if (!r.ok) { line(false, 'Zugriff auf das Repository', explain(r.status, await r.text().catch(() => ''))); return; }
+    line(true, 'Zugriff auf das Repository');
+  } catch (err) { line(false, 'Zugriff auf das Repository', 'Keine Verbindung zu GitHub.'); return; }
+
+  try {
+    const r = await api(`/repos/${cfg.owner}/${cfg.repo}/contents/${cfg.dir}?ref=${encodeURIComponent(cfg.branch)}`);
+    if (!r.ok && r.status !== 404) { line(false, 'Daten lesen', explain(r.status, await r.text().catch(() => ''))); return; }
+    line(true, 'Daten lesen');
+  } catch (err) { line(false, 'Daten lesen', 'Keine Verbindung zu GitHub.'); return; }
+
+  // The only honest test of write access is an actual write.
+  try {
+    const path = `/repos/${cfg.owner}/${cfg.repo}/contents/data/verbindungstest.json`;
+    let sha = null;
+    const g = await api(`${path}?ref=${encodeURIComponent(cfg.branch)}&t=${Date.now()}`, { cache: 'no-store' });
+    if (g.ok) sha = (await g.json()).sha;
+    const payload = { geprueft: new Date().toISOString(), von: cfg.meId || null };
+    const w = await api(path, {
+      method: 'PUT',
+      body: JSON.stringify({
+        message: 'Verbindungstest',
+        content: btoa(unescape(encodeURIComponent(JSON.stringify(payload, null, 2) + '\n'))),
+        branch: cfg.branch,
+        ...(sha ? { sha } : {})
+      })
+    });
+    if (!w.ok) { line(false, 'Schreiben erlaubt', explain(w.status, await w.text().catch(() => ''))); return; }
+    line(true, 'Schreiben erlaubt');
+  } catch (err) { line(false, 'Schreiben erlaubt', 'Keine Verbindung zu GitHub.'); return; }
+
+  rows.push('<div class="hint" style="margin-top:6px"><b>Alles in Ordnung.</b> Uploads sollten funktionieren.</div>');
+  draw();
+  noteError(null, null);
+  sync();
 }
 
 /* ---------------- views ---------------- */
@@ -754,7 +867,14 @@ function viewSettings(st) {
     <label>Branch</label><input id="br" value="${esc(cfg.branch)}">
     <div style="height:14px"></div>
     <button class="btn" id="saveCfg">Speichern &amp; synchronisieren</button>
+    <div style="height:16px"></div>
+    <h2>Verbindung prüfen</h2>
+    ${lastError ? `<div class="banner err" style="margin-bottom:10px"><b>Letzter Upload-Fehler</b><br>${esc(lastError.msg)}
+        <br><span class="muted">${new Date(lastError.ts).toLocaleString(DE)}</span></div>` : ''}
+    <button class="btn sec" id="testBtn">Verbindung testen</button>
+    <div id="testOut" style="margin-top:8px">${testResult}</div>
   </div>`);
+  c.querySelector('#testBtn').onclick = () => testConnection();
   c.querySelector('#saveCfg').onclick = async () => {
     cfg.token = c.querySelector('#tok').value.trim();
     cfg.owner = c.querySelector('#own').value.trim();
