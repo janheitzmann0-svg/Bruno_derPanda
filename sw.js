@@ -1,6 +1,6 @@
 /* App-shell cache. Trip data is never cached here — it always goes to the
    network so a phone coming back online sees the group's latest entries. */
-const CACHE = 'saustall-payme-v7';
+const CACHE = 'saustall-payme-v8';
 const SHELL = ['./', './index.html', './app.js', './manifest.json',
                './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
@@ -19,6 +19,7 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   if (url.hostname === 'api.github.com' || url.hostname === 'raw.githubusercontent.com') return;
   if (url.origin !== self.location.origin) return;
+  if (url.pathname.includes('/data/')) return;   // entry files are fetched fresh by the app itself
 
   // Network-first so a redeploy reaches everyone, cache as offline fallback.
   // no-store bypasses the browser's own HTTP cache, which would otherwise keep

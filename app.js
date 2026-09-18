@@ -2,7 +2,7 @@
    Every entry is written as its own immutable file under data/entries/,
    so concurrent writers never conflict and nothing is ever overwritten. */
 
-const APP_VERSION = 7;
+const APP_VERSION = 8;
 
 const DEFAULTS = {
   owner: 'janheitzmann0-svg',
@@ -172,8 +172,12 @@ function derive() {
   const byId = {};
   let rate = cfg.rate, rateLabel = cfg.rateLabel, rateTs = 0;
 
+  // People first, in a pass of their own: a rename must find its target even
+  // when clocks disagree and the rename carries an earlier timestamp.
   for (const e of live) {
     if (e.type === 'person') { const p = { id: e.id, name: e.name, ts: e.ts }; people.push(p); byId[e.id] = p; }
+  }
+  for (const e of live) {
     if (e.type === 'rate' && e.eurPerUsd > 0) { rate = e.eurPerUsd; rateLabel = e.label || ''; rateTs = e.ts; }
     if (e.type === 'rename' && byId[e.target]) byId[e.target].name = e.name;
   }
@@ -229,14 +233,20 @@ function plan(st) {
 
 function api(path, opts) {
   const o = Object.assign({ headers: {} }, opts || {});
+  // Keep anonymous reads a CORS "simple request" (no preflight): only Accept.
+  // Authorization and Content-Type are added strictly when needed, so a phone
+  // without a group code never depends on a preflight round-trip.
   o.headers['Accept'] = 'application/vnd.github+json';
-  o.headers['X-GitHub-Api-Version'] = '2022-11-28';
+  if (o.body) o.headers['Content-Type'] = 'application/json';   // GitHub requires it for JSON bodies
   if (cfg.token) o.headers['Authorization'] = 'Bearer ' + cfg.token;
   return fetch('https://api.github.com' + path, o);
 }
 
 /* Turn an HTTP status into something a non-technical person can act on. */
+let lastRaw = '';   // GitHub's own words, for the copyable diagnosis
+
 function explain(status, body) {
+  lastRaw = 'HTTP ' + status + (body ? ' ' + String(body).replace(/\s+/g, ' ').slice(0, 200) : '');
   if (status === 401) return 'Der Gruppen-Code ist ungültig oder abgelaufen. Bitte neu eintragen.';
   if (status === 403) {
     if (/rate limit/i.test(body || '')) return 'GitHub-Limit erreicht. In ein paar Minuten nochmal versuchen.';
@@ -274,16 +284,35 @@ async function pull() {
     const batch = fresh.slice(i, i + pool);
     setSync('busy', `lade ${Math.min(i + pool, fresh.length)}/${fresh.length}`);
     await Promise.all(batch.map(async f => {
-      try {
-        const r = await fetch(f.download_url, { cache: 'no-store' });
-        if (!r.ok) return;
-        const e = await r.json();
-        if (e && e.id) { entries[e.id] = e; files[f.name] = e.id; added++; }
-      } catch (err) { /* skip unreadable file */ }
+      const e = await loadEntry(f);
+      if (e && e.id) { entries[e.id] = e; files[f.name] = e.id; added++; }
     }));
   }
   if (added) { LS.set('entries', entries); LS.set('files', files); }
   return added;
+}
+
+/* Three ways to get one entry file, cheapest and freshest first. Some hotel and
+   campus networks block raw.githubusercontent.com outright; the same-origin
+   copy on GitHub Pages is never blocked but can lag a minute behind a push;
+   the API always works but costs a rate-limit call, so it comes last. */
+async function loadEntry(f) {
+  try {
+    const r = await fetch(f.download_url, { cache: 'no-store' });
+    if (r.ok) return await r.json();
+  } catch (err) { /* raw blocked or offline */ }
+  try {
+    const r = await fetch('./' + f.path, { cache: 'no-store' });
+    if (r.ok && /json/.test(r.headers.get('content-type') || '')) return await r.json();
+  } catch (err) { /* not served from the repo root */ }
+  try {
+    const r = await api(`/repos/${cfg.owner}/${cfg.repo}/contents/${encodeURI(f.path)}?ref=${encodeURIComponent(cfg.branch)}`);
+    if (r.ok) {
+      const j = await r.json();
+      return JSON.parse(decodeURIComponent(escape(atob((j.content || '').replace(/\n/g, '')))));
+    }
+  } catch (err) { /* give up until the next sync */ }
+  return null;
 }
 
 function fileName(e) {
@@ -381,8 +410,16 @@ function summaryLine(e) {
 /* Walk the whole chain read -> write and say in plain German where it breaks. */
 let testResult = '';   // survives the re-render that a successful test triggers
 
+let testReport = '';
+
 async function testConnection() {
   const rows = [];
+  const log = [];
+  const t = cfg.token || '';
+  log.push('Saustall PayMe v' + APP_VERSION);
+  log.push('Repo: ' + cfg.owner + '/' + cfg.repo + ' @' + cfg.branch);
+  log.push('Code: ' + (t ? t.slice(0, 11) + '… (' + t.length + ' Zeichen)' : 'FEHLT'));
+  log.push('Warteschlange: ' + queue.length);
   const draw = () => {
     testResult = rows.join('');
     const t = document.querySelector('#testOut');
@@ -391,7 +428,18 @@ async function testConnection() {
   const line = (ok, txt, extra) => {
     rows.push(`<div class="split"><span>${txt}</span><span class="${ok ? 'pos' : 'neg'}" style="font-weight:700">${ok ? '✓' : '✗'}</span></div>`);
     if (extra) rows.push(`<div class="hint" style="margin:2px 0 8px">${extra}</div>`);
+    log.push((ok ? 'OK  ' : 'FEHLER ') + txt + (ok ? '' : ' -> ' + lastRaw));
+    if (!ok) {
+      rows.push(`<button class="btn sec sm" id="copyDiag" style="margin:4px 0 8px">Diagnose kopieren</button>`);
+    }
     draw();
+    testReport = log.join('\n');
+    const cp = document.querySelector('#copyDiag');
+    if (cp) cp.onclick = () => {
+      navigator.clipboard.writeText(testReport)
+        .then(() => toast('Diagnose kopiert – schick sie Jan'))
+        .catch(() => prompt('Diesen Text kopieren:', testReport));
+    };
   };
   testResult = '<div class="hint">teste …</div>';
   const t0 = document.querySelector('#testOut');
@@ -541,14 +589,15 @@ function viewAdd(st) {
     const c = wrap.querySelector('#pick');
     st.people.forEach(p => {
       const b = el(`<div class="chip">${esc(p.name)}</div>`);
-      b.onclick = () => { cfg.meId = p.id; saveCfg(); draft.payer = null; render(); };
+      b.onclick = () => { cfg.meId = p.id; saveCfg(); draft.init = false; render(); };
       c.appendChild(b);
     });
     return wrap;
   }
 
-  if (draft.payer === null) draft.payer = cfg.meId;
-  if (!draft.sel.length) draft.sel = [cfg.meId];
+  // Defaults only for a fresh form — a deliberately emptied selection ("Keiner")
+  // must stay empty, otherwise that button does nothing.
+  if (!draft.init) { draft.init = true; draft.payer = cfg.meId; draft.sel = [cfg.meId]; }
 
   wrap.appendChild(el(rateNote(st)));
 
@@ -656,7 +705,7 @@ function viewAdd(st) {
     const sh = shares().filter(s => s.usd > 0);
     if (!sh.length) return;
     await add({ type: 'expense', payer: draft.payer, note: draft.note.trim(), shares: sh, rate: st.rate });
-    draft = { payer: cfg.meId, sel: [cfg.meId], total: '', note: '', equal: true, custom: {} };
+    draft = { init: true, payer: cfg.meId, sel: [cfg.meId], total: '', note: '', equal: true, custom: {} };
     toast('Ausgabe gespeichert');
     tab = 'balance'; render();
   };
@@ -824,7 +873,7 @@ function viewPeople(st) {
       <div class="s">${v >= 0 ? 'bekommt zurück' : 'schuldet'} ${eur(Math.abs(v) * st.rate)}</div></div></div>`);
     if (!cfg.meId) {
       const b = el('<button class="btn sec sm">Das bin ich</button>');
-      b.onclick = () => { cfg.meId = p.id; saveCfg(); draft.payer = p.id; draft.sel = [p.id]; render(); };
+      b.onclick = () => { cfg.meId = p.id; saveCfg(); draft.init = false; render(); };
       row.appendChild(b);
     } else if (admin) {
       const b = el('<button class="btn sec sm">Umbenennen</button>');
@@ -1010,7 +1059,7 @@ function phoneCard(st) {
   </div>`);
   c3.querySelector('#resync').onclick = () => sync();
   c3.querySelector('#reload').onclick = hardReload;
-  c3.querySelector('#changeMe').onclick = () => { cfg.meId = null; saveCfg(); tab = 'add'; render(); };
+  c3.querySelector('#changeMe').onclick = () => { cfg.meId = null; saveCfg(); draft.init = false; tab = 'add'; render(); };
   c3.querySelector('#export').onclick = () => {
     const blob = new Blob([JSON.stringify({ exported: new Date().toISOString(), rate: st.rate, entries: st.all }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -1042,7 +1091,7 @@ setSync('', 'bereit');
 sync(true);
 // Retry quickly while something is still waiting to go up, slowly otherwise.
 (function loop() {
-  const wait = queue.length ? 15000 : 60000;
+  const wait = queue.length ? 15000 : (cfg.token ? 60000 : 180000);
   setTimeout(() => {
     if (document.visibilityState === 'visible' && navigator.onLine) sync(true);
     loop();
