@@ -1,0 +1,7 @@
+{
+  "id": "probe_readtest",
+  "type": "ping",
+  "ts": 1789955200000,
+  "by": "claude-test",
+  "note": "Verbindungstest – wird von der App ignoriert"
+}
