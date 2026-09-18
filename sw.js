@@ -1,6 +1,6 @@
 /* App-shell cache. Trip data is never cached here — it always goes to the
    network so a phone coming back online sees the group's latest entries. */
-const CACHE = 'saustall-payme-v9';
+const CACHE = 'saustall-payme-v10';
 const SHELL = ['./', './index.html', './app.js', './manifest.json',
                './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 

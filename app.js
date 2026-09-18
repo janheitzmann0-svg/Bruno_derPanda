@@ -2,7 +2,7 @@
    Every entry is written as its own immutable file under data/entries/,
    so concurrent writers never conflict and nothing is ever overwritten. */
 
-const APP_VERSION = 9;
+const APP_VERSION = 10;
 
 const DEFAULTS = {
   owner: 'janheitzmann0-svg',
@@ -35,13 +35,33 @@ const el = (h) => { const d = document.createElement('div'); d.innerHTML = h.tri
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const r2 = n => Math.round(n * 100) / 100;
+/* "12,50" and "12.50" must both work: German keyboards offer the comma. */
+const num = v => { const n = parseFloat(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.')); return isNaN(n) ? 0 : n; };
 const fmt = (n, d) => (Math.abs(n) < 0.005 ? 0 : n).toLocaleString('de-DE', { minimumFractionDigits: d == null ? 2 : d, maximumFractionDigits: d == null ? 2 : d });
 const usd = n => fmt(n) + ' $';
 const eur = n => fmt(n) + ' €';
 const DE = 'de-DE';
 
 let toastBox = null;
-const isAdmin = () => cfg.meId === cfg.admin;
+/* The administrator account is protected by a PIN. It lives in the (public)
+   source, so it keeps honest people from tapping the wrong name — it is not a
+   secret against anyone who reads this file. */
+const ADMIN_PIN = '2609';
+const isAdmin = () => cfg.meId === cfg.admin && cfg.adminOk === true;
+
+function askAdminPin() {
+  const v = prompt('Dieses Konto ist der Administrator.\nBitte Admin-Code eingeben:');
+  if (v === null) return false;
+  if (v.trim() !== ADMIN_PIN) { toast('Falscher Admin-Code'); return false; }
+  cfg.adminOk = true; saveCfg();
+  return true;
+}
+
+/* Choosing an identity — the admin account only with the PIN. */
+function chooseMe(id) {
+  if (id === cfg.admin && !askAdminPin()) return;
+  cfg.meId = id; saveCfg(); draft.init = false; render();
+}
 
 /* --- Installation als App --- */
 let installEvent = null;
@@ -589,7 +609,7 @@ function viewAdd(st) {
     const c = wrap.querySelector('#pick');
     st.people.forEach(p => {
       const b = el(`<div class="chip">${esc(p.name)}</div>`);
-      b.onclick = () => { cfg.meId = p.id; saveCfg(); draft.init = false; render(); };
+      b.onclick = () => chooseMe(p.id);
       c.appendChild(b);
     });
     return wrap;
@@ -615,7 +635,7 @@ function viewAdd(st) {
     </div>
     <div style="height:14px"></div>
     <label>Betrag in US-Dollar</label>
-    <input id="total" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00">
+    <input id="total" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00">
     <div class="hint" id="conv"></div>
     <div style="height:12px"></div>
     <label>Wofür?</label>
@@ -665,12 +685,12 @@ function viewAdd(st) {
     const sel = draft.sel;
     if (!sel.length) return [];
     if (draft.equal) {
-      const t = Math.round((parseFloat(draft.total) || 0) * 100);
+      const t = Math.round(num(draft.total) * 100);
       const base = Math.floor(t / sel.length);
       let rest = t - base * sel.length;
       return sel.map((p, i) => ({ p, usd: (base + (i < rest ? 1 : 0)) / 100 }));
     }
-    return sel.map(p => ({ p, usd: r2(parseFloat(draft.custom[p]) || 0) }));
+    return sel.map(p => ({ p, usd: r2(num(draft.custom[p])) }));
   }
 
   function refresh() {
@@ -692,7 +712,7 @@ function viewAdd(st) {
     cb.appendChild(el('<div style="height:6px"></div>'));
     draft.sel.forEach(pid => {
       const row = el(`<div class="shareRow"><span class="nm">${esc((st.byId[pid] || {}).name || '?')}</span>
-        <input type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00"></div>`);
+        <input type="text" inputmode="decimal" autocomplete="off" placeholder="0,00"></div>`);
       const inp = row.querySelector('input');
       inp.value = draft.custom[pid] || '';
       inp.oninput = () => { draft.custom[pid] = inp.value; refresh(); };
@@ -712,6 +732,56 @@ function viewAdd(st) {
 
   refresh();
   return wrap;
+}
+
+/* --- Donut: who you pay / who pays you --- */
+// Categorical palette (dark surface), validated for colour-vision deficiency.
+const SERIES = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
+
+function donut(title, rows, st, kind) {
+  // rows: [{name, usd}] – fold everything beyond seven into "Andere"
+  rows = rows.slice().sort((a, b) => b.usd - a.usd);
+  if (rows.length > 8) {
+    const rest = rows.splice(7);
+    rows.push({ name: 'Andere (' + rest.length + ')', usd: rest.reduce((a, r) => a + r.usd, 0) });
+  }
+  const total = rows.reduce((a, r) => a + r.usd, 0);
+  const card = el(`<div class="card"><h2>${title}</h2></div>`);
+  if (!total) {
+    card.appendChild(el(`<div class="hint" style="margin:0">${kind === 'owe' ? 'Du schuldest niemandem etwas.' : 'Dir schuldet niemand etwas.'}</div>`));
+    return card;
+  }
+  const R = 54, r = 36, C = 64, circ = 2 * Math.PI * ((R + r) / 2);
+  let acc = 0;
+  const segs = rows.map((row, i) => {
+    const frac = row.usd / total;
+    const len = Math.max(0, frac * circ - 2);          // 2px surface gap between segments
+    const seg = `<circle class="seg" data-i="${i}" cx="${C}" cy="${C}" r="${(R + r) / 2}" fill="none" stroke="${SERIES[i]}"
+        stroke-width="${R - r}" stroke-dasharray="${len} ${circ - len}" stroke-dashoffset="${-acc * circ + 1}"
+        transform="rotate(-90 ${C} ${C})"><title>${esc(row.name)}: ${eur(row.usd * st.rate)} (${usd(row.usd)})</title></circle>`;
+    acc += frac;
+    return seg;
+  }).join('');
+  const wrap = el(`<div class="donutWrap">
+    <svg viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="${esc(title)}: ${eur(total * st.rate)}">
+      ${segs}
+      <text x="${C}" y="${C - 4}" text-anchor="middle" class="dTot">${esc(eur(total * st.rate))}</text>
+      <text x="${C}" y="${C + 12}" text-anchor="middle" class="dSub">${esc(usd(total))}</text>
+    </svg>
+    <div class="legend">${rows.map((row, i) => `
+      <div class="lg" data-i="${i}"><span class="sw" style="background:${SERIES[i]}"></span>
+        <span class="nm">${esc(row.name)}</span>
+        <span class="amt">${eur(row.usd * st.rate)}<small>${Math.round(row.usd / total * 100)} %</small></span></div>`).join('')}
+    </div></div>`);
+  // tap/hover a legend row or slice: emphasise both
+  const hi = i => { wrap.querySelectorAll('.seg,.lg').forEach(n => n.classList.toggle('dim', i != null && n.dataset.i !== String(i))); };
+  wrap.querySelectorAll('.seg,.lg').forEach(n => {
+    n.addEventListener('mouseenter', () => hi(n.dataset.i));
+    n.addEventListener('mouseleave', () => hi(null));
+    n.addEventListener('click', () => hi(n.classList.contains('dim') || !wrap.querySelector('.dim') ? n.dataset.i : null));
+  });
+  card.appendChild(wrap);
+  return card;
 }
 
 /* --- Balance --- */
@@ -749,6 +819,13 @@ function viewBalance(st) {
       list.appendChild(row);
     });
     wrap.appendChild(c);
+
+    const owe = mine.filter(t => t.from === me).map(t => ({ name: nm(t.to), usd: t.usd }));
+    const get = mine.filter(t => t.to === me).map(t => ({ name: nm(t.from), usd: t.usd }));
+    const two = el('<div class="twoCol"></div>');
+    two.appendChild(donut('Wem du zahlst', owe, st, 'owe'));
+    two.appendChild(donut('Von wem du bekommst', get, st, 'get'));
+    wrap.appendChild(two);
   }
 
   const c2 = el('<div class="card"><h2>Alle</h2><div id="all"></div></div>');
@@ -789,7 +866,7 @@ function settleSheet(st, from, to, amt) {
     <h2 style="margin-top:0">Zahlung eintragen</h2>
     <p class="hint" style="margin-top:0">${esc(nm(from))} gibt ${esc(nm(to))} das Geld – bar oder überwiesen. Es wird nichts gelöscht: die Rückzahlung wird zusätzlich eingetragen.</p>
     <label>Betrag in US-Dollar</label>
-    <input id="amt" type="number" inputmode="decimal" step="0.01" value="${amt.toFixed(2)}">
+    <input id="amt" type="text" inputmode="decimal" autocomplete="off" value="${amt.toFixed(2).replace('.', ',')}">
     <div class="hint" id="cv"></div>
     <div style="height:14px"></div>
     <button class="btn" id="ok">Zahlung eintragen</button>
@@ -799,12 +876,12 @@ function settleSheet(st, from, to, amt) {
   document.body.appendChild(s);
   const inp = s.querySelector('#amt');
   const cv = s.querySelector('#cv');
-  const upd = () => cv.innerHTML = '= <b>' + eur((parseFloat(inp.value) || 0) * st.rate) + '</b>';
+  const upd = () => cv.innerHTML = '= <b>' + eur(num(inp.value) * st.rate) + '</b>';
   inp.oninput = upd; upd();
   s.querySelector('#cancel').onclick = () => s.remove();
   s.onclick = e => { if (e.target === s) s.remove(); };
   s.querySelector('#ok').onclick = async () => {
-    const v = r2(parseFloat(inp.value) || 0);
+    const v = r2(num(inp.value));
     if (v <= 0) return;
     s.remove();
     await add({ type: 'settle', from, to, usd: v });
@@ -873,7 +950,7 @@ function viewPeople(st) {
       <div class="s">${v >= 0 ? 'bekommt zurück' : 'schuldet'} ${eur(Math.abs(v) * st.rate)}</div></div></div>`);
     if (!cfg.meId) {
       const b = el('<button class="btn sec sm">Das bin ich</button>');
-      b.onclick = () => { cfg.meId = p.id; saveCfg(); draft.init = false; render(); };
+      b.onclick = () => chooseMe(p.id);
       row.appendChild(b);
     } else if (admin) {
       const b = el('<button class="btn sec sm">Umbenennen</button>');
@@ -890,6 +967,7 @@ function viewPeople(st) {
   wrap.appendChild(c);
 
   if (!admin) {
+    const ul = adminUnlockCard(); if (ul) wrap.appendChild(ul);
     wrap.appendChild(el(`<div class="hint" style="padding:0 2px">Die Gruppenliste verwaltet
       ${esc((st.byId[cfg.admin] || {}).name || 'der Administrator')}. Sag Bescheid, wenn jemand fehlt.</div>`));
     return wrap;
@@ -930,8 +1008,18 @@ function viewPeople(st) {
 }
 
 /* --- Settings --- */
+function adminUnlockCard() {
+  if (cfg.meId !== cfg.admin || cfg.adminOk) return null;
+  const c = el(`<div class="card accent"><h2>Admin-Code nötig</h2>
+    <p class="hint" style="margin-top:0">Du bist als <b>Administrator</b> angemeldet. Die Admin-Funktionen sind gesperrt, bis der Code eingegeben ist.</p>
+    <button class="btn" id="unlock">Admin-Code eingeben</button></div>`);
+  c.querySelector('#unlock').onclick = () => { if (askAdminPin()) render(); };
+  return c;
+}
+
 function viewSettings(st) {
   const wrap = el('<div></div>');
+  const ul = adminUnlockCard(); if (ul) wrap.appendChild(ul);
   const ic = installCard(false);
   if (ic) wrap.appendChild(ic);
 
@@ -1022,7 +1110,7 @@ function viewSettings(st) {
       Einmal am Anfang holen und setzen; über 10 Tage ist die Schwankung zu vernachlässigen.
       Danach bleibt der Wert eingefroren, bis du ihn selbst änderst.</p>
     <label>Euro pro 1 US-Dollar</label>
-    <input id="rate" type="number" step="0.0001" min="0" value="${st.rate}">
+    <input id="rate" type="text" inputmode="decimal" autocomplete="off" value="${String(st.rate).replace('.', ',')}">
     <div style="height:10px"></div>
     <label>Notiz (optional)</label>
     <input id="rlab" placeholder="z. B. EZB-Kurs, 12. Sept." value="${esc(st.rateLabel || '')}">
@@ -1048,7 +1136,7 @@ function viewSettings(st) {
         if (!r.ok) continue;
         const got = s.pick(await r.json());
         if (!(got.rate > 0)) continue;
-        c2.querySelector('#rate').value = Math.round(got.rate * 10000) / 10000;
+        c2.querySelector('#rate').value = String(Math.round(got.rate * 10000) / 10000).replace('.', ',');
         c2.querySelector('#rlab').value = got.src + ' vom ' + got.date;
         btn.disabled = false; btn.textContent = 'Aktuellen Kurs aus dem Internet holen';
         toast('Kurs geholt: ' + fmt(got.rate, 4) + ' € pro 1 $ – jetzt unten bestätigen', 5000);
@@ -1060,7 +1148,7 @@ function viewSettings(st) {
   };
 
   c2.querySelector('#saveRate').onclick = async () => {
-    const v = parseFloat(c2.querySelector('#rate').value);
+    const v = num(c2.querySelector('#rate').value);
     if (!(v > 0)) { toast('Bitte einen gültigen Kurs eingeben'); return; }
     await add({ type: 'rate', eurPerUsd: v, label: c2.querySelector('#rlab').value.trim() });
     toast('Kurs gesetzt');
@@ -1096,7 +1184,7 @@ function phoneCard(st) {
   </div>`);
   c3.querySelector('#resync').onclick = () => sync();
   c3.querySelector('#reload').onclick = hardReload;
-  c3.querySelector('#changeMe').onclick = () => { cfg.meId = null; saveCfg(); draft.init = false; tab = 'add'; render(); };
+  c3.querySelector('#changeMe').onclick = () => { cfg.meId = null; cfg.adminOk = false; saveCfg(); draft.init = false; tab = 'add'; render(); };
   c3.querySelector('#export').onclick = () => {
     const blob = new Blob([JSON.stringify({ exported: new Date().toISOString(), rate: st.rate, entries: st.all }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');

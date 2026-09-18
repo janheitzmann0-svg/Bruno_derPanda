@@ -107,6 +107,22 @@ nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.9;st
 .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:none}
 .dot.ok{background:var(--good)}.dot.busy{background:var(--warn)}.dot.bad{background:var(--bad)}.dot.warn{background:var(--warn)}
 .hidden{display:none!important}
+.twoCol{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:560px){.twoCol{grid-template-columns:1fr 1fr}}
+.twoCol .card{margin-bottom:0}
+.donutWrap{display:flex;gap:14px;align-items:center}
+.donutWrap svg{flex:none}
+.dTot{fill:var(--text);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+.dSub{fill:var(--muted);font-size:9.5px}
+.legend{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.lg{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;transition:opacity .15s}
+.lg .sw{width:10px;height:10px;border-radius:3px;flex:none}
+.lg .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg .amt{font-size:13px}
+.lg .amt small{font-size:10.5px}
+.seg{transition:opacity .15s;cursor:pointer}
+.dim{opacity:.25}
+.twoCol{margin-bottom:12px}
 .iconbtn{background:var(--surface2);border:1px solid var(--accent);border-radius:999px;
   padding:6px 9px;cursor:pointer;display:flex;align-items:center;color:var(--accent);flex:none}
 .iconbtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
