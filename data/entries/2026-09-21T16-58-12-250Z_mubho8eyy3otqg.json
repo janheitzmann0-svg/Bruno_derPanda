@@ -1,0 +1,15 @@
+{
+  "type": "expense",
+  "payer": "p_timo",
+  "note": "Asia",
+  "shares": [
+    {
+      "p": "p_sarah",
+      "usd": 12
+    }
+  ],
+  "rate": 0.8706,
+  "id": "mubho8eyy3otqg",
+  "ts": 1790009892250,
+  "by": "p_jan"
+}
